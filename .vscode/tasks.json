@@ -21,7 +21,75 @@
 				"showReuseMessage": true,
 				"clear": false
 			},
-			"problemMatcher": []
+			"problemMatcher": ["$zig"]
+		},
+		{
+			"label": "Build Release",
+			"type": "shell",
+			"command": "zig",
+			"args": [
+				"build",
+				"-Doptimize=ReleaseFast"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "silent",
+				"focus": false,
+				"panel": "shared",
+				"showReuseMessage": true,
+				"clear": false
+			},
+			"problemMatcher": ["$zig"]
+		},
+		{
+			"label": "Build (Linux x64) Release",
+			"type": "shell",
+			"command": "zig",
+			"args": [
+				"build",
+				"-Doptimize=ReleaseFast",
+				"-Dtarget=x86_64-linux-gnu"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "silent",
+				"focus": false,
+				"panel": "shared",
+				"showReuseMessage": true,
+				"clear": false
+			},
+			"problemMatcher": ["$zig"]
+		},
+		{
+			"label": "Build (Windows x64) Release",
+			"type": "shell",
+			"command": "zig",
+			"args": [
+				"build",
+				"-Doptimize=ReleaseFast",
+				"-Dtarget=x86_64-windows-gnu"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"presentation": {
+				"echo": true,
+				"reveal": "silent",
+				"focus": false,
+				"panel": "shared",
+				"showReuseMessage": true,
+				"clear": false
+			},
+			"problemMatcher": ["$zig"]
 		}
 	]
 }
