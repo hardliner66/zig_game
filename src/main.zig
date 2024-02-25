@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const math = std.math;
 const os = std.os;
 const fmt = std.fmt;
 const maxInt = std.math.maxInt;
@@ -23,6 +24,10 @@ var camera = rl.Camera2D{
 // Constants
 const MAX_BUILDINGS = 100;
 
+// Types
+const Circle = struct { radius: f32 };
+const Direction = enum { right, down_right, down, down_left, left, top_left, top, top_right };
+
 // Game States
 const GameStateStartup = struct {};
 const GameStateStartScreen = struct {};
@@ -38,10 +43,17 @@ const GameState = union(enum) {
 
 // Parts
 const ColorRectangle = struct { rect: rl.Rectangle, color: rl.Color };
+const ColorCircle = struct { circle: Circle, color: rl.Color };
 
 // Components
 const Position = struct { x: f32, y: f32 };
-const Drawable = union(enum) { rect: rl.Rectangle, color_rect: ColorRectangle };
+const Velocity = struct { x: f32, y: f32 };
+const Orientation = struct { direction: Direction };
+const Drawable = union(enum) {
+    rect: rl.Rectangle,
+    color_rect: ColorRectangle,
+    color_circle: ColorCircle,
+};
 
 // Tags
 const Player = struct {};
@@ -54,6 +66,7 @@ const Foreground = struct {};
 fn handle_input(it: *ecs.iter_t) callconv(.C) void {
     const pos = ecs.field(it, Position, 1).?;
     _ = ecs.field(it, Player, 2);
+    const orientation = ecs.field(it, Orientation, 3).?;
 
     camera.zoom += rl.GetMouseWheelMove() * 0.05;
 
@@ -67,21 +80,61 @@ fn handle_input(it: *ecs.iter_t) callconv(.C) void {
         camera.zoom = 1.0;
     }
 
+    const entities = it.entities();
+
     for (0..it.count()) |i| {
+        var vel = rl.Vector2{ .x = 0, .y = 0 };
         if (rl.IsKeyDown(rl.KEY_A)) {
-            pos[i].x -= 2;
+            vel.x -= 2;
         }
         if (rl.IsKeyDown(rl.KEY_D)) {
-            pos[i].x += 2;
+            vel.x += 2;
         }
         if (rl.IsKeyDown(rl.KEY_W)) {
-            pos[i].y -= 2;
+            vel.y -= 2;
         }
         if (rl.IsKeyDown(rl.KEY_S)) {
-            pos[i].y += 2;
+            vel.y += 2;
         }
+
+        const x: i32 = @intFromFloat(math.sign(vel.x));
+        const y: i32 = @intFromFloat(math.sign(vel.y));
+
+        if (x == 1 and y == 0) {
+            orientation[i].direction = Direction.right;
+        } else if (x == 1 and y == 1) {
+            orientation[i].direction = Direction.down_right;
+        } else if (x == 0 and y == 1) {
+            orientation[i].direction = Direction.down;
+        } else if (x == -1 and y == 1) {
+            orientation[i].direction = Direction.down_left;
+        } else if (x == -1 and y == 0) {
+            orientation[i].direction = Direction.left;
+        } else if (x == -1 and y == -1) {
+            orientation[i].direction = Direction.top_left;
+        } else if (x == 0 and y == -1) {
+            orientation[i].direction = Direction.top;
+        } else if (x == 1 and y == -1) {
+            orientation[i].direction = Direction.top_right;
+        }
+
+        _ = ecs.set(it.world, entities[i], Velocity, .{
+            .x = pos[i].x + vel.x,
+            .y = pos[i].y + vel.y,
+        });
     }
 }
+
+fn move(it: *ecs.iter_t) callconv(.C) void {
+    const pos = ecs.field(it, Position, 1).?;
+    const vel = ecs.field(it, Velocity, 2).?;
+
+    for (0..it.count()) |i| {
+        pos[i].x = vel[i].x;
+        pos[i].y = vel[i].y;
+    }
+}
+
 fn get_camera_target(it: *ecs.iter_t) callconv(.C) void {
     const pos = ecs.field(it, Position, 1).?;
     _ = ecs.field(it, CameraTarget, 2);
@@ -92,28 +145,60 @@ fn get_camera_target(it: *ecs.iter_t) callconv(.C) void {
     }
 }
 
+pub fn polarToCartesian(r: f32, theta: f32) rl.Vector2 {
+    const x = r * std.math.cos(theta);
+    const y = r * std.math.sin(theta);
+    return rl.Vector2{ .x = x, .y = y };
+}
+
 fn draw(it: *ecs.iter_t) callconv(.C) void {
-    const pos = ecs.field(it, Position, 1).?;
+    const position = ecs.field(it, Position, 1).?;
     const drawable = ecs.field(it, Drawable, 2).?;
+    const orientation = ecs.field(it, Orientation, 3);
+
+    const theta = std.math.pi / 4.0;
 
     for (0..it.count()) |i| {
-        const p = pos[i];
+        const pos = position[i];
         switch (drawable[i]) {
             Drawable.rect => |d| {
                 rl.DrawRectangleRec(rl.Rectangle{
-                    .x = d.x + p.x,
-                    .y = d.y + p.y,
+                    .x = d.x + pos.x,
+                    .y = d.y + pos.y,
                     .width = d.width,
                     .height = d.height,
                 }, rl.RED);
             },
             Drawable.color_rect => |d| {
                 rl.DrawRectangleRec(rl.Rectangle{
-                    .x = d.rect.x + p.x,
-                    .y = d.rect.y + p.y,
+                    .x = d.rect.x + pos.x,
+                    .y = d.rect.y + pos.y,
                     .width = d.rect.width,
                     .height = d.rect.height,
                 }, d.color);
+            },
+            Drawable.color_circle => |d| {
+                const p = rl.Vector2{
+                    .x = pos.x + d.circle.radius,
+                    .y = pos.y + d.circle.radius,
+                };
+                rl.DrawCircleV(p, d.circle.radius, d.color);
+                if (orientation != null) {
+                    const dir = orientation.?;
+                    const cart = polarToCartesian(
+                        d.circle.radius,
+                        theta * @as(f32, @floatFromInt(@intFromEnum(dir[i].direction))),
+                    );
+                    const end = rl.Vector2{
+                        .x = p.x + cart.x,
+                        .y = p.y + cart.y,
+                    };
+                    rl.DrawLineV(
+                        p,
+                        end,
+                        rl.BLACK,
+                    );
+                }
             },
         }
     }
@@ -147,6 +232,8 @@ fn init_ecs(args: InitArgs) *ecs.world_t {
     // };
 
     ecs.COMPONENT(world, Position);
+    ecs.COMPONENT(world, Velocity);
+    ecs.COMPONENT(world, Orientation);
     ecs.COMPONENT(world, Drawable);
 
     ecs.TAG(world, Player);
@@ -159,7 +246,17 @@ fn init_ecs(args: InitArgs) *ecs.world_t {
         system_desc.callback = handle_input;
         system_desc.query.filter.terms[0] = .{ .id = ecs.id(Position) };
         system_desc.query.filter.terms[1] = .{ .id = ecs.id(Player) };
+        system_desc.query.filter.terms[2] = .{ .id = ecs.id(Orientation) };
         break :sys SYSTEM(world, "handle_input", ecs.OnUpdate, &system_desc);
+    };
+
+    const move_system = sys: {
+        var system_desc = ecs.system_desc_t{};
+        system_desc.callback = move;
+        system_desc.query.filter.terms[0] = .{ .id = ecs.id(Position) };
+        system_desc.query.filter.terms[1] = .{ .id = ecs.id(Velocity) };
+        system_desc.query.filter.terms[2] = .{ .id = ecs.id(CameraTarget), .oper = ecs.oper_kind_t.Optional };
+        break :sys SYSTEM(world, "move", handle_input_system, &system_desc);
     };
 
     {
@@ -167,7 +264,7 @@ fn init_ecs(args: InitArgs) *ecs.world_t {
         system_desc.callback = get_camera_target;
         system_desc.query.filter.terms[0] = .{ .id = ecs.id(Position) };
         system_desc.query.filter.terms[1] = .{ .id = ecs.id(CameraTarget) };
-        _ = SYSTEM(world, "get_camera_target", handle_input_system, &system_desc);
+        _ = SYSTEM(world, "get_camera_target", move_system, &system_desc);
     }
 
     const draw_background_system = sys: {
@@ -184,8 +281,9 @@ fn init_ecs(args: InitArgs) *ecs.world_t {
         system_desc.callback = draw;
         system_desc.query.filter.terms[0] = .{ .id = ecs.id(Position) };
         system_desc.query.filter.terms[1] = .{ .id = ecs.id(Drawable) };
-        system_desc.query.filter.terms[2] = .{ .id = ecs.id(Foreground), .oper = ecs.oper_kind_t.Not };
-        system_desc.query.filter.terms[3] = .{ .id = ecs.id(Background), .oper = ecs.oper_kind_t.Not };
+        system_desc.query.filter.terms[2] = .{ .id = ecs.id(Orientation), .oper = ecs.oper_kind_t.Optional };
+        system_desc.query.filter.terms[3] = .{ .id = ecs.id(Foreground), .oper = ecs.oper_kind_t.Not };
+        system_desc.query.filter.terms[4] = .{ .id = ecs.id(Background), .oper = ecs.oper_kind_t.Not };
         break :sys SYSTEM(world, "draw", draw_background_system, &system_desc);
     };
 
@@ -402,14 +500,11 @@ pub fn main() anyerror!void {
 
     const player = ecs.new_entity(world, "Player");
     _ = ecs.set(world, player, Position, .{ .x = 400, .y = 280 });
-    _ = ecs.set(world, player, Drawable, .{
-        .rect = rl.Rectangle{
-            .x = 0,
-            .y = 0,
-            .width = 40,
-            .height = 40,
-        },
-    });
+    _ = ecs.set(world, player, Orientation, .{ .direction = Direction.right });
+    _ = ecs.set(world, player, Drawable, .{ .color_circle = ColorCircle{
+        .circle = Circle{ .radius = 20 },
+        .color = rl.BLUE,
+    } });
     _ = ecs.add(world, player, Player);
     _ = ecs.add(world, player, CameraTarget);
 
@@ -460,7 +555,7 @@ pub fn main() anyerror!void {
             defer rl.EndMode2D();
 
             _ = ecs.progress(world, 0);
-            draw_debug(game_state);
+            // draw_debug(game_state);
         }
 
         try draw_ui(game_state);
