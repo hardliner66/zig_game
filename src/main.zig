@@ -103,8 +103,22 @@ fn draw(it: *ecs.iter_t) callconv(.C) void {
     }
 }
 
-fn init_ecs() *ecs.world_t {
+const InitArgs = struct {
+    enable_rest: bool = true,
+    enable_monitor: bool = true,
+};
+
+fn init_ecs(args: InitArgs) *ecs.world_t {
     const world = ecs.init();
+
+    if (args.enable_monitor) {
+        _ = ecs.import_c(world, ecs.FlecsMonitorImport, "FlecsMonitor");
+    }
+    if (args.enable_rest) {
+        const EcsRest = ecs.lookup_fullpath(world, "flecs.rest.Rest");
+        const EcsRestVal: ecs.EcsRest = .{};
+        _ = ecs.set_id(world, EcsRest, EcsRest, @sizeOf(ecs.EcsRest), &EcsRestVal);
+    }
 
     ecs.COMPONENT(world, Position);
     ecs.COMPONENT(world, ecs.EcsRest);
@@ -159,8 +173,6 @@ fn init_ecs() *ecs.world_t {
         ecs.SYSTEM(world, "draw_foreground", ecs.PostUpdate, &system_desc);
     }
 
-    _ = singleton(world, ecs.EcsRest, .{});
-
     return world;
 }
 
@@ -172,7 +184,8 @@ fn generate_buildings(world: *ecs.world_t) void {
         const width: f32 = @floatFromInt(rl.GetRandomValue(50, 200));
         const height: f32 = @floatFromInt(rl.GetRandomValue(100, 800));
         const x: f32 = @floatFromInt(-6000 + spacing);
-        const building = rl.Rectangle{ .x = x, .y = 0, .width = width, .height = height };
+        const y = screen_height - 130.0 - height;
+        const building = rl.Rectangle{ .x = x, .y = y, .width = width, .height = height };
         spacing += @as(i32, @intFromFloat(width));
 
         const r: u8 = @truncate(@as(u32, @intCast(rl.GetRandomValue(200, 240))));
@@ -187,7 +200,7 @@ fn generate_buildings(world: *ecs.world_t) void {
 }
 
 pub fn main() anyerror!void {
-    const world = init_ecs();
+    const world = init_ecs(.{});
     defer _ = ecs.fini(world);
 
     generate_buildings(world);
@@ -256,28 +269,4 @@ pub fn main() anyerror!void {
 
         _ = ecs.progress(world, 0);
     }
-}
-
-pub const ecs_app_desc_t = extern struct {
-    target_fps: f32 = 0,
-    delta_time: f32 = 0,
-    threads: c_int = 0,
-    frames: c_int = 0,
-    enable_rest: bool = false,
-    enable_monitor: bool = false,
-    init: ?*anyopaque = null,
-    ctx: ?*anyopaque = null,
-};
-
-extern "c" fn ecs_app_run(world: *ecs.world_t, app_desc: *ecs_app_desc_t) c_int;
-pub inline fn app_run(world: *ecs.world_t, app_desc: *ecs_app_desc_t) i32 {
-    return ecs_app_run(world, app_desc);
-}
-
-pub inline fn singleton(world: *ecs.world_t, comptime T: type, val: T) ecs.entity_t {
-    return ecs.set(world, ecs.id(T), T, val);
-}
-
-pub inline fn get_singleton_mut(world: *ecs.world_t, comptime T: type) ?*T {
-    return ecs.get_mut(world, ecs.id(T), T);
 }
